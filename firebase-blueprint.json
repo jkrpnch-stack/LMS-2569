@@ -1,0 +1,110 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A user in the LMS, either teacher or student",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["teacher", "student"] },
+        "totalScore": { "type": "number" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["email", "name", "role", "totalScore", "createdAt"]
+    },
+    "Course": {
+      "title": "Course",
+      "description": "A course managed by a teacher",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "isPublished": { "type": "boolean" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["title", "description", "teacherId", "isPublished", "createdAt"]
+    },
+    "Lesson": {
+      "title": "Lesson",
+      "description": "A lesson inside a course",
+      "type": "object",
+      "properties": {
+        "courseId": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "order": { "type": "number" },
+        "type": { "type": "string", "enum": ["content", "quiz"] },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["courseId", "title", "content", "order", "type", "createdAt"]
+    },
+    "Question": {
+      "title": "Question",
+      "description": "A question for a quiz lesson",
+      "type": "object",
+      "properties": {
+        "lessonId": { "type": "string" },
+        "text": { "type": "string" },
+        "options": { "type": "array" },
+        "correctOptionIndex": { "type": "number" }
+      },
+      "required": ["lessonId", "text", "options", "correctOptionIndex"]
+    },
+    "Enrollment": {
+      "title": "Enrollment",
+      "description": "A student's enrollment in a course",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string" },
+        "courseId": { "type": "string" },
+        "progress": { "type": "object" },
+        "totalScore": { "type": "number" },
+        "enrolledAt": { "type": "number" }
+      },
+      "required": ["studentId", "courseId", "totalScore", "enrolledAt"]
+    },
+    "QuizAttempt": {
+      "title": "QuizAttempt",
+      "description": "A student's attempt at a quiz",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string" },
+        "lessonId": { "type": "string" },
+        "courseId": { "type": "string" },
+        "score": { "type": "number" },
+        "cheatingFlags": { "type": "number" },
+        "completed": { "type": "boolean" },
+        "attemptedAt": { "type": "number" }
+      },
+      "required": ["studentId", "lessonId", "courseId", "score", "cheatingFlags", "completed", "attemptedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profiles"
+    },
+    "/courses/{courseId}": {
+      "schema": { "$ref": "#/entities/Course" },
+      "description": "Courses"
+    },
+    "/lessons/{lessonId}": {
+      "schema": { "$ref": "#/entities/Lesson" },
+      "description": "Lessons"
+    },
+    "/questions/{questionId}": {
+      "schema": { "$ref": "#/entities/Question" },
+      "description": "Questions for quizzes"
+    },
+    "/enrollments/{enrollmentId}": {
+      "schema": { "$ref": "#/entities/Enrollment" },
+      "description": "Student course enrollments"
+    },
+    "/quizAttempts/{attemptId}": {
+      "schema": { "$ref": "#/entities/QuizAttempt" },
+      "description": "Student quiz attempts containing cheating info and scores"
+    }
+  }
+}

@@ -1,0 +1,192 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() { return request.auth != null; }
+    function isValidId(id) { return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    
+    function isTeacher(userId) {
+      let userDoc = get(/databases/$(database)/documents/users/$(userId));
+      return userDoc != null && userDoc.data.role == 'teacher';
+    }
+
+    // Role cannot be changed by user directly, except during initial creation if required (but we'll allow basic creation)
+    // Actually, setting role securely means only admins/teachers or using a specific process.
+    // For simplicity of prototype, users create their profile and select role. Once created, they can't change it.
+    
+    // User Validator
+    function isValidUser(data) {
+      return data.keys().hasAll(['email', 'name', 'role', 'totalScore', 'createdAt'])
+        && data.keys().size() == 5
+        && data.email is string && data.email.size() <= 100
+        && data.name is string && data.name.size() <= 100
+        && data.role in ['teacher', 'student']
+        && data.totalScore is number
+        && data.createdAt is number;
+    }
+
+    match /users/{userId} {
+      allow get: if isSignedIn();  // Needed for leaderboards and teacher checks
+      allow list: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.auth.uid == userId
+        && isValidId(userId)
+        && isValidUser(incoming())
+        && incoming().totalScore == 0;
+        
+      allow update: if isSignedIn()
+        && request.auth.uid == userId
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'totalScore'])
+        && incoming().name is string
+        && incoming().name.size() <= 100
+        && incoming().totalScore is number;
+    }
+
+    // Course Validator
+    function isValidCourse(data) {
+      return data.keys().hasAll(['title', 'description', 'teacherId', 'isPublished', 'createdAt'])
+        && data.keys().size() == 5
+        && data.title is string && data.title.size() > 0 && data.title.size() <= 200
+        && data.description is string && data.description.size() <= 2000
+        && data.teacherId is string
+        && data.isPublished is bool
+        && data.createdAt is number;
+    }
+
+    match /courses/{courseId} {
+      allow read: if isSignedIn(); 
+      allow create: if isSignedIn()
+        && isValidId(courseId)
+        && isValidCourse(incoming())
+        && incoming().teacherId == request.auth.uid
+        && isTeacher(request.auth.uid);
+      allow update: if isSignedIn()
+        && existing().teacherId == request.auth.uid
+        && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'description', 'isPublished'])
+        && incoming().title is string && incoming().title.size() > 0 && incoming().title.size() <= 200
+        && incoming().description is string && incoming().description.size() <= 2000
+        && incoming().isPublished is bool;
+      allow delete: if isSignedIn() && existing().teacherId == request.auth.uid;
+    }
+
+    // Lesson Validator
+    function isValidLesson(data) {
+      return data.keys().hasAll(['courseId', 'title', 'content', 'order', 'type', 'createdAt'])
+        && data.keys().size() == 6
+        && data.courseId is string
+        && data.title is string && data.title.size() > 0 && data.title.size() <= 200
+        && data.content is string && data.content.size() <= 50000
+        && data.order is number
+        && data.type in ['content', 'quiz']
+        && data.createdAt is number;
+    }
+
+    match /lessons/{lessonId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && isValidId(lessonId)
+        && isValidLesson(incoming())
+        && exists(/databases/$(database)/documents/courses/$(incoming().courseId))
+        && get(/databases/$(database)/documents/courses/$(incoming().courseId)).data.teacherId == request.auth.uid;
+      allow update: if isSignedIn()
+        && get(/databases/$(database)/documents/courses/$(existing().courseId)).data.teacherId == request.auth.uid
+        && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'content', 'order', 'type'])
+        && incoming().title is string && incoming().title.size() > 0 && incoming().title.size() <= 200
+        && incoming().content is string && incoming().content.size() <= 50000
+        && incoming().order is number
+        && incoming().type in ['content', 'quiz'];
+      allow delete: if isSignedIn() 
+        && get(/databases/$(database)/documents/courses/$(existing().courseId)).data.teacherId == request.auth.uid;
+    }
+
+    // Question Validator
+    function isValidQuestion(data) {
+      return data.keys().hasAll(['lessonId', 'text', 'options', 'correctOptionIndex'])
+        && data.keys().size() == 4
+        && data.lessonId is string
+        && data.text is string && data.text.size() > 0 && data.text.size() <= 1000
+        && data.options is list && data.options.size() <= 10 && data.options.size() >= 2
+        // technically, should check all options are strings, but we limit to basic checks
+        && data.correctOptionIndex is number && data.correctOptionIndex >= 0 && data.correctOptionIndex < data.options.size();
+    }
+
+    match /questions/{questionId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && isValidId(questionId)
+        && isValidQuestion(incoming())
+        && exists(/databases/$(database)/documents/lessons/$(incoming().lessonId))
+        && get(/databases/$(database)/documents/courses/$(get(/databases/$(database)/documents/lessons/$(incoming().lessonId)).data.courseId)).data.teacherId == request.auth.uid;
+      allow update: if isSignedIn()
+        && get(/databases/$(database)/documents/courses/$(get(/databases/$(database)/documents/lessons/$(existing().lessonId)).data.courseId)).data.teacherId == request.auth.uid
+        && incoming().diff(existing()).affectedKeys().hasOnly(['text', 'options', 'correctOptionIndex'])
+        && incoming().text is string && incoming().text.size() > 0 && incoming().text.size() <= 1000
+        && incoming().options is list && incoming().options.size() <= 10 && incoming().options.size() >= 2
+        && incoming().correctOptionIndex is number && incoming().correctOptionIndex >= 0 && incoming().correctOptionIndex < incoming().options.size();
+      allow delete: if isSignedIn() 
+        && get(/databases/$(database)/documents/courses/$(get(/databases/$(database)/documents/lessons/$(existing().lessonId)).data.courseId)).data.teacherId == request.auth.uid;
+    }
+
+    // Enrollment Validator
+    function isValidEnrollment(data) {
+      return data.keys().hasAll(['studentId', 'courseId', 'progress', 'totalScore', 'enrolledAt'])
+        && data.keys().size() == 5
+        && data.studentId is string
+        && data.courseId is string
+        && data.totalScore is number
+        && data.enrolledAt is number
+        && data.progress is map;
+    }
+
+    match /enrollments/{enrollmentId} {
+      allow read: if isSignedIn() && (resource.data.studentId == request.auth.uid || isTeacher(request.auth.uid));
+      // teacher can list all enrollments, students can list their own
+      allow list: if isSignedIn() && (resource.data.studentId == request.auth.uid || isTeacher(request.auth.uid));
+      allow create: if isSignedIn()
+        && isValidId(enrollmentId)
+        && isValidEnrollment(incoming())
+        && incoming().studentId == request.auth.uid
+        && exists(/databases/$(database)/documents/courses/$(incoming().courseId))
+        && incoming().totalScore == 0;
+      allow update: if isSignedIn()
+        && existing().studentId == request.auth.uid
+        && incoming().diff(existing()).affectedKeys().hasOnly(['progress', 'totalScore'])
+        && incoming().progress is map
+        && incoming().totalScore is number;
+    }
+
+    // QuizAttempt Validator
+    function isValidQuizAttempt(data) {
+      return data.keys().hasAll(['studentId', 'lessonId', 'courseId', 'score', 'cheatingFlags', 'completed', 'attemptedAt'])
+        && data.keys().size() == 7
+        && data.studentId is string
+        && data.lessonId is string
+        && data.courseId is string
+        && data.score is number
+        && data.cheatingFlags is number
+        && data.completed is bool
+        && data.attemptedAt is number;
+    }
+
+    match /quizAttempts/{attemptId} {
+      allow read: if isSignedIn() && (resource.data.studentId == request.auth.uid || get(/databases/$(database)/documents/courses/$(resource.data.courseId)).data.teacherId == request.auth.uid);
+      allow list: if isSignedIn() && (resource.data.studentId == request.auth.uid || get(/databases/$(database)/documents/courses/$(resource.data.courseId)).data.teacherId == request.auth.uid);
+      allow create: if isSignedIn()
+        && isValidId(attemptId)
+        && isValidQuizAttempt(incoming())
+        && incoming().studentId == request.auth.uid
+        && exists(/databases/$(database)/documents/lessons/$(incoming().lessonId));
+      allow update: if isSignedIn()
+        && existing().studentId == request.auth.uid
+        && incoming().diff(existing()).affectedKeys().hasOnly(['score', 'cheatingFlags', 'completed'])
+        && incoming().score is number
+        && incoming().cheatingFlags is number
+        && incoming().completed is bool;
+    }
+  }
+}
